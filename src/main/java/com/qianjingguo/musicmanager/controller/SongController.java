@@ -1,5 +1,6 @@
 package com.qianjingguo.musicmanager.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.qianjingguo.musicmanager.entity.Song;
 import com.qianjingguo.musicmanager.mapper.SongMapper;
 import com.qianjingguo.musicmanager.service.AiRecognitionService;
@@ -99,14 +100,22 @@ public class SongController {
         return song;
     }
 
-    // 自然语言检索歌曲
     @GetMapping("/search")
     public List<Song> search(@RequestParam String query) throws Exception {
-        List<Song> allSongs = songMapper.selectList(null);
+        // 优化点：只查询已经打过标签的歌曲，且限制最大数量，避免全量数据发给AI
+        QueryWrapper<Song> wrapper = new QueryWrapper<>();
+        wrapper.isNotNull("tags")
+                .orderByDesc("create_time")
+                .last("LIMIT 200"); // 最多取最近200首参与AI判断
 
-        // 把所有歌曲的标签信息整理成文本，交给AI做语义匹配
+        List<Song> candidateSongs = songMapper.selectList(wrapper);
+
+        if (candidateSongs.isEmpty()) {
+            return new java.util.ArrayList<>(); // 没有可检索的歌曲，直接返回空列表
+        }
+
         StringBuilder songListText = new StringBuilder();
-        for (Song song : allSongs) {
+        for (Song song : candidateSongs) {
             songListText.append(String.format("id:%d, 歌名:%s, 标签:%s\n",
                     song.getId(), song.getTitle(), song.getTags()));
         }
@@ -118,39 +127,11 @@ public class SongController {
         List<Song> result = new java.util.ArrayList<>();
         for (JsonNode idNode : idsArray) {
             Long id = idNode.asLong();
-            allSongs.stream()
+            candidateSongs.stream()
                     .filter(s -> s.getId().equals(id))
                     .findFirst()
                     .ifPresent(result::add);
         }
         return result;
-    }
-    @Value("${file.upload.path}")
-    private String uploadPath;
-
-    @PostMapping("/upload-audio/{id}")
-    public Song uploadAudio(@PathVariable Long id, @RequestParam("file") MultipartFile file) throws Exception {
-        Song song = songMapper.selectById(id);
-        if (song == null) {
-            throw new RuntimeException("歌曲不存在");
-        }
-
-        // 确保目录存在
-        java.io.File dir = new java.io.File(uploadPath);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-
-        // 用歌曲id+原始文件名作为保存的文件名，避免重名覆盖
-        String originalFilename = file.getOriginalFilename();
-        String savedFilename = id + "_" + originalFilename;
-        java.io.File destFile = new java.io.File(uploadPath + savedFilename);
-        file.transferTo(destFile);
-
-        // 更新数据库记录
-        song.setFilePath(uploadPath + savedFilename);
-        songMapper.updateById(song);
-
-        return song;
     }
 }
