@@ -4,6 +4,7 @@ import com.qianjingguo.musicmanager.entity.Song;
 import com.qianjingguo.musicmanager.mapper.SongMapper;
 import com.qianjingguo.musicmanager.service.AiRecognitionService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.JsonNode;
@@ -123,5 +124,33 @@ public class SongController {
                     .ifPresent(result::add);
         }
         return result;
+    }
+    @Value("${file.upload.path}")
+    private String uploadPath;
+
+    @PostMapping("/upload-audio/{id}")
+    public Song uploadAudio(@PathVariable Long id, @RequestParam("file") MultipartFile file) throws Exception {
+        Song song = songMapper.selectById(id);
+        if (song == null) {
+            throw new RuntimeException("歌曲不存在");
+        }
+
+        // 确保目录存在
+        java.io.File dir = new java.io.File(uploadPath);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
+        // 用歌曲id+原始文件名作为保存的文件名，避免重名覆盖
+        String originalFilename = file.getOriginalFilename();
+        String savedFilename = id + "_" + originalFilename;
+        java.io.File destFile = new java.io.File(uploadPath + savedFilename);
+        file.transferTo(destFile);
+
+        // 更新数据库记录
+        song.setFilePath(uploadPath + savedFilename);
+        songMapper.updateById(song);
+
+        return song;
     }
 }
