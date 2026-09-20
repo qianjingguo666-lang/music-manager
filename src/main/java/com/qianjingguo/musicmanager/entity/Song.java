@@ -16,4 +16,5 @@ public class Song {
     private String filePath;
     private String coverPath;
     private LocalDateTime createTime;
+    private String tags;
 }

@@ -73,4 +73,55 @@ public class SongController {
 
         return song; // 返回完整的Song对象（包含数据库自动生成的id）
     }
+    // 给指定歌曲生成AI标签
+    @PostMapping("/generate-tags/{id}")
+    public Song generateTags(@PathVariable Long id) throws Exception {
+        Song song = songMapper.selectById(id);
+        if (song == null) {
+            throw new RuntimeException("歌曲不存在");
+        }
+
+        String tagsJson = aiRecognitionService.generateTags(
+                song.getTitle(), song.getArtist(), song.getAlbum());
+
+        // 把AI返回的 ["标签1","标签2"] 转成 "标签1,标签2" 存进数据库
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode tagsArray = mapper.readTree(tagsJson);
+        StringBuilder tagsBuilder = new StringBuilder();
+        for (JsonNode tag : tagsArray) {
+            if (tagsBuilder.length() > 0) tagsBuilder.append(",");
+            tagsBuilder.append(tag.asText());
+        }
+        song.setTags(tagsBuilder.toString());
+        songMapper.updateById(song);
+
+        return song;
+    }
+
+    // 自然语言检索歌曲
+    @GetMapping("/search")
+    public List<Song> search(@RequestParam String query) throws Exception {
+        List<Song> allSongs = songMapper.selectList(null);
+
+        // 把所有歌曲的标签信息整理成文本，交给AI做语义匹配
+        StringBuilder songListText = new StringBuilder();
+        for (Song song : allSongs) {
+            songListText.append(String.format("id:%d, 歌名:%s, 标签:%s\n",
+                    song.getId(), song.getTitle(), song.getTags()));
+        }
+
+        String matchedIdsJson = aiRecognitionService.searchByNaturalLanguage(query, songListText.toString());
+
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode idsArray = mapper.readTree(matchedIdsJson);
+        List<Song> result = new java.util.ArrayList<>();
+        for (JsonNode idNode : idsArray) {
+            Long id = idNode.asLong();
+            allSongs.stream()
+                    .filter(s -> s.getId().equals(id))
+                    .findFirst()
+                    .ifPresent(result::add);
+        }
+        return result;
+    }
 }
